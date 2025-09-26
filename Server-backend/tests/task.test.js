@@ -1,61 +1,139 @@
-const { v4: uuidv4 } = require('uuid');
-const fileStorage = require('../utils/fileStorage');
+const { expect } = require('chai');
+const Task = require('../src/models/Task');
+const fileStorage = require('../src/utils/fileStorage');
 
-class Task {
-  constructor({ title, description, due_date, status = 'pending', id = null, created_at = null }) {
-    this.id = id || uuidv4();
-    this.title = title;
-    this.description = description;
-    this.due_date = due_date;
-    this.status = status;
-    this.created_at = created_at || new Date().toISOString();
-  }
+describe('Task Model', () => {
+  beforeEach(async () => {
+    // Clear the tasks file before each test
+    await fileStorage.writeData([]);
+  });
 
-  async save() {
-    const tasks = await fileStorage.readData();
-    const index = tasks.findIndex((t) => t.id === this.id);
+  it('should create a new task', async () => {
+    const taskData = {
+      title: 'Test Task',
+      description: 'Test Description',
+      due_date: '2024-12-31'
+    };
 
-    if (index >= 0) {
-      // Update existing task
-      tasks[index] = this;
-    } else {
-      // Add new task
-      tasks.push(this);
-    }
+    const task = new Task(taskData);
+    await task.save();
 
-    await fileStorage.writeData(tasks);
-    return this;
-  }
+    const savedTasks = await Task.findAll();
+    expect(savedTasks).to.have.lengthOf(1);
+    expect(savedTasks[0].title).to.equal(taskData.title);
+    expect(savedTasks[0].status).to.equal('pending');
+  });
 
-  static async findAll() {
-    const tasks = await fileStorage.readData();
-    // ✅ Ensure sorting by created_at DESC
-    return tasks.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-  }
+  it('should mark a task as complete', async () => {
+    const taskData = {
+      title: 'Test Task',
+      description: 'Test Description',
+      due_date: '2024-12-31'
+    };
 
-  static async findById(id) {
-    const tasks = await fileStorage.readData();
-    return tasks.find((t) => t.id === id) || null;
-  }
+    const task = new Task(taskData);
+    await task.save();
 
-  static async deleteById(id) {
-    let tasks = await fileStorage.readData();
-    tasks = tasks.filter((t) => t.id !== id);
-    await fileStorage.writeData(tasks);
-  }
+    const completedTask = await Task.markComplete(task.id);
+    expect(completedTask.status).to.equal('completed');
 
-  static async markComplete(id) {
-    const tasks = await fileStorage.readData();
-    const task = tasks.find((t) => t.id === id);
+    const savedTask = await Task.findById(task.id);
+    expect(savedTask.status).to.equal('completed');
+  });
 
-    if (task) {
-      task.status = 'completed';
-      await fileStorage.writeData(tasks);
-      return task;
-    }
+  it('should delete a task', async () => {
+    const taskData = {
+      title: 'Test Task',
+      description: 'Test Description',
+      due_date: '2024-12-31'
+    };
 
-    return null;
-  }
-}
+    const task = new Task(taskData);
+    await task.save();
 
-module.exports = Task;
+    await Task.deleteById(task.id);
+    const savedTasks = await Task.findAll();
+    expect(savedTasks).to.have.lengthOf(0);
+  });
+
+  it('should retrieve all tasks', async () => {
+    const taskData1 = {
+      title: 'Task 1',
+      description: 'Description 1',
+      due_date: '2024-12-25'
+    };
+    const taskData2 = {
+      title: 'Task 2',
+      description: 'Description 2',
+      due_date: '2024-12-30'
+    };
+
+    const task1 = new Task(taskData1);
+    const task2 = new Task(taskData2);
+    await task1.save();
+    await task2.save();
+
+    const tasks = await Task.findAll();
+    expect(tasks).to.have.lengthOf(2);
+    expect(tasks[0].title).to.equal('Task 2'); // Sorted by created_at descending
+    expect(tasks[1].title).to.equal('Task 1');
+  });
+
+  it('should retrieve a specific task by ID', async () => {
+    const taskData = {
+      title: 'Test Task',
+      description: 'Test Description',
+      due_date: '2024-12-31'
+    };
+
+    const task = new Task(taskData);
+    await task.save();
+
+    const retrievedTask = await Task.findById(task.id);
+    expect(retrievedTask).to.not.be.null;
+    expect(retrievedTask.title).to.equal('Test Task');
+    expect(retrievedTask.description).to.equal('Test Description');
+  });
+
+  it('should return null for a non-existent task when retrieving by ID', async () => {
+    const retrievedTask = await Task.findById('non-existent-id');
+    expect(retrievedTask).to.be.null;
+  });
+
+  it('should update an existing task', async () => {
+    const taskData = {
+      title: 'Old Title',
+      description: 'Old Description',
+      due_date: '2024-12-31'
+    };
+
+    const task = new Task(taskData);
+    await task.save();
+
+    task.title = 'Updated Title';
+    task.description = 'Updated Description';
+    task.status = 'in-progress'; // Update task status
+    await task.save();
+
+    const updatedTask = await Task.findById(task.id);
+    expect(updatedTask.title).to.equal('Updated Title');
+    expect(updatedTask.description).to.equal('Updated Description');
+    expect(updatedTask.status).to.equal('in-progress');
+  });
+
+  it('should not update a non-existent task', async () => {
+    const taskData = {
+      title: 'Non-existent Task',
+      description: 'This task doesn\'t exist',
+      due_date: '2024-12-31'
+    };
+
+    const task = new Task(taskData);
+    await task.save();
+
+    // Try to update a task that doesn't exist in the file
+    const fakeId = 'non-existent-id';
+    const nonExistentTask = await Task.findById(fakeId);
+    expect(nonExistentTask).to.be.null;
+  });
+});
